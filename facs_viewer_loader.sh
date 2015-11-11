@@ -1,71 +1,13 @@
 #!/bin/bash
 #
-# This script takes Customer site backups (Db or logs) and stores them on the Ordo server. The database baskups are also 
-# installed on the facs_viewer. Emails are sent out when finished.
-# The script is run every 30 minutes (or so) as a cron job.
-# The script uses the box-linux-sync and WebDAV (davfs2) programs to mount Vigilent's complete Box.com file set on the drive /nfs 
-#
 # AUTHOR: N Wheatley (C) vigilent 2015
 # DATE: 7/30/2015 - initial script written.
-# 
-# LOGICAL PSEUDOCODE (can be put in a README file at some stage):
 #
-# first ensure we're running under sudo ... if not, exit with log msg L4 "must invoke with sudo"
-# set working directory - this is needed when it runs in a cron job
-# now ensure a previous program is not still running ... if busy exit with log msg L1 "busy - try later" 
-# if box-linux-sync is up and running (Box folders exist) then
-#   continue and write log message L6 - "Box-linux-sync is running ok"
-# else
-#   if the box-linux-sync password file doesn't exist, exit with log/email msg M9 - "Box-linux-sync is dead and we cannot find the password file."
-#   else try to start box-linux-sync and send log/email msg M12 "Trying to start box-linux-sync"
-#     if ok 
-#       sleep for 60 seconds to let files mount
-#       continue with log/mail msg M10 - "Box-linux-sync started ok"
-#     else
-#       exit with log/email msg M11 - "Box-linux-sync didn't start with login file"
-# now get the new files *.tgz
-# repeat for each *.tgz file found
-# extract the customer and site name .... log msg L2 - "got new .tgz file"
-# if file is empty ... exit with log/email msg M8 - "file is empty"
-# if the file is invalid .. rename file, skip to next, with email/log M6 "file is not a valid logs or DB backup - skipping and renaming"
-# If the filename contains spaces or brackets then change them to dashes (ie rename the file) .. this is for Reggie :)
-# check file integrity  (using tar -tf)
-#   if file is corrupt ... rename file and exit with log/email msg M7 - "backup is corrupt, renamed"
-#   if ok then
-#     write log msg L3 - "file is good"
-#     if log file
-#       copy to log repo
-#       if ok
-#         rename file, skip to next file with email/log msg M4 "logs backup saved, file renamed" 
-#       else
-#         rename file, skip to next file with email/log msg M5 "logs backup not saved, file renamed" 
-#     else if db backup
-#       write log msg L5 - "installing db on facs_viewer"
-#       install file on facs_viewer
-#       if ok 
-#         copy to Db repo
-#         if ok
-#           rename file, skip to next, with email/log M1 "DB installed on facs_viewer and stored ok"
-#         else
-#           rename file, skip to next, with email/log M2 "DB installed on facs_viewer but failed to store"
-#       else
-#         rename file, skip to next, with email/log M3 "DB installed on facs_viewer failed"
+# This script takes Customer site backups (Db or logs) and stores them on the # # Ordo server. The database backups are also installed on the facs_viewer.
+# Emails are sent out when finished.
+# The script is run every 30 minutes (or so) as a cron job. The script uses the # box-linux-sync and WebDAV (davfs2) programs to mount Vigilent's complete # # # # Box.com file set on the drive /nfs 
 #
-# Assumptions:
-#   1. all log file backups will contain the word "log" (in any case)
-#   2. All database backups will not contain the word "log" but will contain the word "back"
-#   3. <CUST>, <SITE> and .tgz folder/file names should not contain spacs or brackets ...
-#   3. Spaces and braces in .tgz filenames will be changed to dashes "-" 
-#   4. Spaces and brackets in <CUST> and <SITE> folders are not changed - their .tgz files will not be processed.
-#   5. We create all <CUST>/<SITE> directories before storing the backup .tgz files 
-#   6. After copying the files we change owner from root to fc (they're root as we run in sudo).
-#   6. We check whether the program is already running (using ps -ef) 
-#   7. send email as CC to Roy and shawna - waiting for facs_viewer_admin@vigilent.com email alias to be created.
-#
-# TO DO
-#  1. check that both <SITE> and <CUST> folders are present  
-#  2. Create the README file and put it somewhere useful
-DESCRIPTION="
+#DESCRIPTION="
 This script adds Customer Site databases to the Ordo facs_viewer. It should be run as an hourly cron job. It scans the Vigilent Box.com account for
 log and database backup (.tgz) files. The backup files are saved and the originals re-named. Emails are sent out when finished.
 Output log files are in ~/facs_viewer4/cron-output-facs_viewer_loader.log and ~/db_FacsViewerArchive/facs_viewer4_posting_logs with format <DATE>-<CUST>-<SITE>.log
@@ -73,6 +15,84 @@ Output log files are in ~/facs_viewer4/cron-output-facs_viewer_loader.log and ~/
 The script uses the box-linux-sync and WebDAV (davfs2) programs to mount Vigilent's complete Box.com file set (All Files > Customer> Ordo-upload-files) on
 the drive /nfs/box-files-all-vigilent/Ordo-upload-files.
 "
+#
+ 
+# LOGICAL PSEUDOCODE (can be put in a README file at some stage):
+#
+# first ensure we're running under sudo ... if not, exit with log msg L4 "must 
+# invoke with sudo"
+# set working directory - this is needed when it runs in a cron job
+# now ensure a previous program is not still running ... if busy exit with log
+# msg L1 "busy - try later" 
+# if box-linux-sync is up and running (Box folders exist) then
+#   continue and write log message L6 - "Box-linux-sync is running ok"
+# else
+#   if the box-linux-sync password file doesn't exist, exit with log/email msg 
+#           M9 - "Box-linux-sync is dead and we cannot find the password file."
+#   else try to start box-linux-sync and send log/email msg M12 "Trying to start 
+#               box-linux-sync"
+#     if ok 
+#       sleep for 60 seconds to let files mount
+#       continue with log/mail msg M10 - "Box-linux-sync started ok"
+#     else
+#       exit with log/email msg M11 - "Box-linux-sync didn't start with login 
+#                                        file"
+# now get the new files *.tgz
+# repeat for each *.tgz file found
+# extract the customer and site name .... log msg L2 - "got new .tgz file"
+# if file is empty ... exit with log/email msg M8 - "file is empty"
+# if the file is invalid .. rename file, skip to next, with email/log M6 "file 
+#                    is not a valid logs or DB backup - skipping and renaming"
+# If the filename contains spaces or brackets then change them to dashes (ie 
+#                                  rename the file) .. this is for Reggie :)
+# check file integrity  (using tar -tf)
+#   if file is corrupt ... rename file and exit with log/email msg M7 - "backup 
+#                                                           is corrupt, renamed"
+#   if ok then
+#     write log msg L3 - "file is good"
+#     if log file
+#       copy to log repo
+#       if ok
+#         rename file, skip to next file with email/log msg M4 "logs backup 
+#                                                       saved, file renamed" 
+#       else
+#         rename file, skip to next file with email/log msg M5 "logs backup not 
+#                                                        saved, file renamed" 
+#     else if db backup
+#       write log msg L5 - "installing db on facs_viewer"
+#       install file on facs_viewer
+#       if ok 
+#         copy to Db repo
+#         if ok
+#           rename file, skip to next, with email/log M1 "DB installed on 
+#                                                  facs_viewer and stored ok"
+#         else
+#           rename file, skip to next, with email/log M2 "DB installed on 
+#                                        facs_viewer but failed to store"
+#       else
+#         rename file, skip to next, with email/log M3 "DB install on 
+#                                                   facs_viewer failed"
+#
+# Assumptions:
+#   1. all log file backups will contain the word "log" (in any case)
+#   2. All database backups will not contain the word "log" but will contain the 
+#                                                                    word "back"
+#   3. <CUST>, <SITE> and .tgz folder/file names should not contain spaces or
+#                                                             brackets.
+#   3. Spaces and braces in .tgz filenames will be changed to dashes "-" 
+#   4. Spaces and brackets in <CUST> and <SITE> folders are not changed - their 
+#                                            .tgz files will not be processed.
+#   5. We create all <CUST>/<SITE> directories before storing the backup .tgz                        
+#                                                                    files 
+#   6. After copying the files we change owner from root to fc (they're root as 
+#                                                             we run in sudo).
+#   6. We check whether the program is already running (using ps -ef) 
+#   7. send email as CC to Roy and shawna - waiting for 
+#                 facs_viewer_admin@vigilent.com email alias to be created.
+#
+# TO DO
+#  1. check that both <SITE> and <CUST> folders are present  
+#  2. Create the README file and put it somewhere useful
 #
 # write out the help info
 PROG=$(basename $0)
